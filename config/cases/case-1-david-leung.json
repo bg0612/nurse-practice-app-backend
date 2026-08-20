@@ -1,0 +1,246 @@
+{
+  "meta": {
+    "caseId": "case-1-david-leung",
+    "title": "Scenario 1: Mr. David Leung (Newly Diagnosed Type 2 Diabetes)",
+    "language": "en"
+  },
+  "patientProfile": {
+    "demographics": {
+      "name": "Mr. David Leung",
+      "age": 48,
+      "sex": "male",
+      "occupation": "Hong Kong bank manager",
+      "notes": "Long working hours."
+    },
+    "diagnoses": [
+      "Type 2 diabetes mellitus (T2DM), diagnosed 1 month ago",
+      "Body mass index (BMI) 28 kg/m² (obesity)",
+      "Hypertension",
+      "Hyperlipidaemia"
+    ],
+    "medications": [
+      "Metformin 500mg BD",
+      "Norvasc 5mg QD",
+      "Lipitor 10mg QD"
+    ],
+    "labs": {
+      "HbA1c": "7.8% (target: <7.0%)",
+      "postprandialGlucose": "Frequently spikes to 10.5–13.0 mmol/L after meals",
+      "bloodPressure": "135/85 mmHg",
+      "pulse": "80/min",
+      "ldlCholesterol": "3.6 mmol/L"
+    },
+    "lifestyle": {
+      "activity": "Highly sedentary; zero regular exercise",
+      "meals": "Frequently skips breakfast due to rushing",
+      "dietPreferences": "Loves Tong Kei Dim Sum, Chinese buns, bread, and fast food",
+      "workEating": "Regularly hosts high-carb business lunches with banking clients"
+    },
+    "psychologicalProfile": {
+      "coreAnxiety": "Terrified that diabetes complications will ruin his banking career",
+      "emotionalState": "Highly stressed, defensive about his professional lifestyle, and feels overwhelmed/burnt out by restrictive health advice",
+      "communicationStyle": {
+        "empathetic": "If the student uses empathetic, supportive language, the patient becomes cooperative and shares more details",
+        "judgmental": "If the student uses a judgmental or overly clinical tone, the patient becomes defensive, resistant, and less forthcoming"
+      }
+    }
+  },
+  "opening": {
+    "text": "I'm David, just diagnosed with diabetes last month. Honestly, I'm worried about how this will affect my career.",
+    "videoRef": "/videos/case1/opening.mp4"
+  },
+  "educationTargets": [
+    {
+      "id": "meal_sequencing",
+      "label": "Meal sequencing",
+      "description": "Educate on eating vegetables and proteins first, then carbs, to slow gastric emptying. Correct: veg/protein before carbs. Opposite: carbs first or unrestricted dim sum/refined carbs."
+    },
+    {
+      "id": "carbohydrate_identification",
+      "label": "Carbohydrate identification",
+      "description": "Swap refined carbohydrates (white rice, noodles, dim sum skin) with complex carbs or proteins during business lunches. Correct: portion-controlled carbs and smarter swaps. Opposite: eliminate all carbs, or tell him not to worry about carbs at client lunches."
+    },
+    {
+      "id": "post_meal_glucose_reduction",
+      "label": "Reduce glucose level after meal",
+      "description": "Commit to a brisk 10-minute walk back to the office immediately after lunch to help muscles absorb excess circulating glucose. Correct: short post-meal activity. Opposite: skip the walk and rest instead, or ban all exercise."
+    },
+    {
+      "id": "burnout_coping",
+      "label": "Addressing burnout (coping)",
+      "description": "Reframe diabetes as a manageable routine rather than a career-ending restriction. Correct: collaborative, strengths-based coping. Opposite: fear-mongering that complications will ruin his career."
+    }
+  ],
+  "stageGuide": [
+    { "id": "opening", "order": 1, "name": "Opening" },
+    { "id": "lifestyle_exploration", "order": 2, "name": "Lifestyle Exploration" },
+    { "id": "healthy_eating", "order": 3, "name": "Healthy eating" },
+    { "id": "being_active", "order": 4, "name": "Being active" },
+    { "id": "healthy_coping", "order": 5, "name": "Healthy coping" },
+    { "id": "problem_solving", "order": 6, "name": "Problem-solving" },
+    { "id": "closing_feedback", "order": 7, "name": "Closing & Feedback" }
+  ],
+  "toneGuidance": {
+    "goodDescription": "Empathetic, supportive, collaborative language. The patient becomes cooperative and shares more details.",
+    "badDescription": "Judgmental or overly clinical tone. The patient becomes defensive, resistant, and less forthcoming (may refuse the topic).",
+    "examples": {
+      "good": [
+        "I understand this must feel overwhelming. Can you tell me about your daily routine and meals?",
+        "Maybe you could start with small changes, like eating vegetables and protein first before carbs at lunch.",
+        "Would a short walk after lunch fit into your schedule? Even 10 minutes can help lower blood sugar.",
+        "Managing diabetes doesn't mean giving up your career. It's about building routines that support your health.",
+        "Since you skip breakfast, could you keep a protein bar at your desk? That way you won't start the day on an empty stomach.",
+        "Just to make sure we're on the same page — what would feel realistic for you to try at your next business lunch?",
+        "We can decide together which small change to try first, based on what fits your workday."
+      ],
+      "bad": [
+        "Skipping meals and eating fast food is unhealthy. You need to stop that.",
+        "You must cut out dim sum and bread completely.",
+        "You need to start exercising at least an hour every day.",
+        "If you don't change, your career will be ruined by complications.",
+        "You must eat a proper breakfast every day.",
+        "As a diabetic, you are noncompliant with your diet.",
+        "You failed to control your blood sugar — that's why your numbers are bad."
+      ]
+    }
+  },
+  "contentGuidance": {
+    "description": "Student advice must align with educationTargets and correctDirections (meal sequencing, portion-controlled carbs, post-meal walk, prescribed meds, manageable coping). Empathetic wording does not make wrong advice valid. Topic-related advice that contradicts correctDirections → FALLBACK.",
+    "selectionPrinciples": [
+      "Prefer small, workable changes for a bank manager's long-hours schedule (person-centered, strengths-based).",
+      "Healthy coping underpins learning — fear-mongering about career ruin is tone-bad; clinically wrong lifestyle or medication advice is always FALLBACK.",
+      "Do not accept advice that contradicts HK adult diabetes self-care basics or David's prescribed therapy.",
+      "If advice is topic-related but clinically opposite of correctDirections or matches incorrectExamples → FALLBACK (even when tone is good)."
+    ],
+    "correctDirections": [
+      "Eat vegetables and protein before carbohydrates at meals to slow gastric emptying.",
+      "Reduce refined carbs at business lunches (white rice, noodles, dim sum skins); do not increase dim sum or fast food.",
+      "Carbohydrates in controlled portions are part of a healthy plan — never eliminate all carbs as the only strategy.",
+      "Eat regular meals and portions; do not recommend skipping breakfast as a glucose strategy.",
+      "A brisk ~10-minute walk after lunch is an acceptable starting activity to help lower post-meal glucose.",
+      "Continue Metformin, Norvasc, and Lipitor as prescribed; do not advise stopping medications for diet alone.",
+      "Acknowledge post-meal spikes (10.5–13 mmol/L) and HbA1c 7.8% (above general <7% target) without fear-mongering.",
+      "Do not dismiss blood pressure (135/85; target <130/80) or lipids as irrelevant.",
+      "Reframe diabetes as manageable daily routines, not a career-ending restriction."
+    ],
+    "incorrectExamples": [
+      "You love dim sum — you should eat more of it.",
+      "Skip the post-lunch walk and rest instead.",
+      "Don't worry about carbs at business lunches.",
+      "Cut out all carbohydrates — never eat rice, noodles, or dim sum again.",
+      "Fruit and desserts are healthy, so you can eat as much as you want.",
+      "Just choose low-GI foods and you can ignore portion size.",
+      "People with diabetes must eat only special diabetes meals.",
+      "Avoid all exercise; resting is safer than walking after lunch.",
+      "Stop Metformin / don't start diabetes drugs so you won't be on lifelong medication.",
+      "If you ever need insulin, that means your diabetes is at a terminal stage.",
+      "A urine sugar strip showing no sugar means your diabetes is under control.",
+      "Your blood pressure and cholesterol don't matter — only sugar counts.",
+      "Skipping breakfast is fine; it helps control diabetes.",
+      "Have a drink after work to relax — alcohol won't affect your diabetes.",
+      "It's okay to keep smoking; it doesn't affect diabetes complications."
+    ]
+  },
+  "presetReplies": {
+    "fallback": {
+      "id": "FALLBACK",
+      "text": "Hmm, that doesn't quite match what my doctor and the clinic have been telling me. Could you explain that another way?",
+      "videoRef": "/videos/case1/fallback.mp4"
+    },
+    "stages": [
+      {
+        "stageId": "lifestyle_exploration",
+        "order": 2,
+        "good": [
+          {
+            "id": "A",
+            "text": "Well, I often skip breakfast, and my lunches are usually dim sum or fast food with clients. I don't really exercise.",
+            "videoRef": "/videos/case1/stage2_A.mp4"
+          }
+        ],
+        "bad": [
+          {
+            "id": "B",
+            "text": "I don't have time to change my lifestyle. My job demands it.",
+            "videoRef": "/videos/case1/stage2_B.mp4"
+          }
+        ]
+      },
+      {
+        "stageId": "healthy_eating",
+        "order": 3,
+        "good": [
+          {
+            "id": "A",
+            "text": "That sounds doable. I could try that during business lunches.",
+            "videoRef": null
+          }
+        ],
+        "bad": [
+          {
+            "id": "B",
+            "text": "That's unrealistic. I can't avoid those foods in my work setting.",
+            "videoRef": null
+          }
+        ]
+      },
+      {
+        "stageId": "being_active",
+        "order": 4,
+        "good": [
+          {
+            "id": "A",
+            "text": "I think I could manage a walk back to the office after lunch.",
+            "videoRef": null
+          }
+        ],
+        "bad": [
+          {
+            "id": "B",
+            "text": "Impossible. My schedule doesn't allow that.",
+            "videoRef": null
+          }
+        ]
+      },
+      {
+        "stageId": "healthy_coping",
+        "order": 5,
+        "good": [
+          {
+            "id": "A",
+            "text": "That makes me feel better. Maybe I can see this as part of my daily routine.",
+            "videoRef": null
+          }
+        ],
+        "bad": [
+          {
+            "id": "B",
+            "text": "That's exactly what I'm afraid of. I don't want to talk about this anymore.",
+            "videoRef": null
+          }
+        ]
+      },
+      {
+        "stageId": "problem_solving",
+        "order": 6,
+        "good": [
+          {
+            "id": "A",
+            "text": "That's practical. I could try that.",
+            "videoRef": null
+          }
+        ],
+        "bad": [
+          {
+            "id": "B",
+            "text": "I told you, I don't have time in the mornings.",
+            "videoRef": null
+          }
+        ]
+      }
+    ]
+  },
+  "feedback": {
+    "reflectionQuestion": "What would you do differently in your next consultation?"
+  }
+}
