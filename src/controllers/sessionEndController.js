@@ -1,235 +1,113 @@
-// backend/src/controllers/sessionEndController.js
-import { loadCaseById } from '../models/caseModel.js';
 import { ApiError } from '../errors/apiError.js';
 import {
+  buildUnavailableFeedback,
   generateFeedback,
   runFeedbackAfterEnd,
 } from '../services/feedbackService.js';
-import {
-  isFeedbackGenerating,
-  markFeedbackGenerating,
-  markFeedbackDone,
-  saveFeedbackResult,
-  loadFeedbackResult,
-} from '../models/feedbackModel.js';
+import { activeSessionRegistry } from '../services/activeSessionRegistry.js';
+import { runEndOperationOnce } from '../models/feedbackModel.js';
 
 export { runFeedbackAfterEnd };
 
-const VALID_ROLES = new Set(['student', 'patient', 'system']);
-const VALID_SOURCES = new Set(['voice', 'typed']);
-const VALID_TONES = new Set(['good', 'bad']);
+const MAX_ID_LENGTH = 128;
+const MAX_CLIENT_TURNS = 60;
+const MAX_TURN_TEXT_LENGTH = 2000;
+const TURN_ROLES = new Set(['student', 'patient']);
+const STUDENT_SOURCES = new Set(['voice', 'typed']);
 
-/**
- * @param {unknown} value
- * @param {string} field
- */
-function requireNonEmptyString(value, field) {
-  if (typeof value !== 'string' || value.trim() === '') {
-    throw new ApiError({
-      code: 'VALIDATION',
-      message: `Invalid request: ${field} is required.`,
-      retryable: false,
-      status: 400,
-      details: { field },
-    });
-  }
-  return value.trim();
+function validation(field, reason) {
+  throw new ApiError({
+    code: 'VALIDATION',
+    message: 'Invalid session End request.',
+    retryable: false,
+    status: 400,
+    details: { field, reason },
+  });
 }
 
-/**
- * @param {unknown} turns
- */
-function validateTurns(turns) {
-  if (!Array.isArray(turns)) {
-    throw new ApiError({
-      code: 'VALIDATION',
-      message: 'Invalid request: turns must be an array.',
-      retryable: false,
-      status: 400,
-      details: { field: 'turns' },
-    });
-  }
-
-  for (let i = 0; i < turns.length; i += 1) {
-    const t = turns[i];
-    if (!t || typeof t !== 'object' || Array.isArray(t)) {
-      throw new ApiError({
-        code: 'VALIDATION',
-        message: `Invalid request: turns[${i}] must be an object.`,
-        retryable: false,
-        status: 400,
-        details: { field: `turns[${i}]` },
-      });
-    }
-    if (!VALID_ROLES.has(t.role)) {
-      throw new ApiError({
-        code: 'VALIDATION',
-        message: `Invalid request: turns[${i}].role is invalid.`,
-        retryable: false,
-        status: 400,
-        details: { field: `turns[${i}].role` },
-      });
-    }
-    if (typeof t.text !== 'string') {
-      throw new ApiError({
-        code: 'VALIDATION',
-        message: `Invalid request: turns[${i}].text must be a string.`,
-        retryable: false,
-        status: 400,
-        details: { field: `turns[${i}].text` },
-      });
-    }
-    if (t.source !== undefined && !VALID_SOURCES.has(t.source)) {
-      throw new ApiError({
-        code: 'VALIDATION',
-        message: `Invalid request: turns[${i}].source is invalid.`,
-        retryable: false,
-        status: 400,
-        details: { field: `turns[${i}].source` },
-      });
-    }
-    if (t.tone !== undefined && !VALID_TONES.has(t.tone)) {
-      throw new ApiError({
-        code: 'VALIDATION',
-        message: `Invalid request: turns[${i}].tone is invalid.`,
-        retryable: false,
-        status: 400,
-        details: { field: `turns[${i}].tone` },
-      });
-    }
-  }
-
-  return /** @type {Array<{ index?: number, role: string, text: string, createdAt?: string, source?: string, tone?: "good" | "bad", stageId?: string, answerId?: string }>} */ (
-    turns
-  );
+function requiredString(value, field) {
+  if (typeof value !== 'string' || !value.trim()) validation(field, 'must be a non-empty string');
+  const text = value.trim();
+  if (Array.from(text).length > MAX_ID_LENGTH) validation(field, `must be at most ${MAX_ID_LENGTH} characters`);
+  return text;
 }
 
-/**
- * Run feedback analysis in the background, keeping the result in memory so it
- * can be polled via GET /api/session/:sessionId/feedback. Never throws upward.
- */
-async function runBackgroundFeedback({
-  sessionId,
-  caseConfig,
-  turns,
-  openRouter,
-  llmEnabled,
-  feedbackFn,
-}) {
-  try {
-    if (!llmEnabled || !openRouter) {
-      await saveFeedbackResult(sessionId, {
-        ok: false,
-        message: 'Feedback service is disabled.',
-      });
-      return;
-    }
-    const feedback = await feedbackFn({ caseConfig, turns, openRouter });
-    await saveFeedbackResult(sessionId, { ok: true, feedback });
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    await saveFeedbackResult(sessionId, { ok: false, message }).catch(
-      () => {},
-    );
-  } finally {
-    markFeedbackDone(sessionId);
+function isoTimestamp(value, field) {
+  if (typeof value !== 'string' || !value.trim()) validation(field, 'must be an ISO-8601 timestamp');
+  const text = value.trim();
+  const milliseconds = Date.parse(text);
+  if (!Number.isFinite(milliseconds) || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z$/.test(text)) {
+    validation(field, 'must be a UTC ISO-8601 timestamp');
   }
+  return { text, milliseconds };
 }
 
-/**
- * POST /api/session/end — schedule background feedback analysis (§6.4).
- * Returns immediately; the frontend polls GET /api/session/:sessionId/feedback.
- * No transcript or feedback is persisted to disk.
- * @param {import('express').Request} req
- * @param {import('express').Response} res
- * @param {import('express').NextFunction} next
- * @param {{
- *   casesDir?: string,
- *   generateFeedbackFn?: typeof generateFeedback,
- * }} deps
- */
+function validateClientTurns(turns) {
+  if (!Array.isArray(turns) || turns.length > MAX_CLIENT_TURNS) {
+    validation('turns', `must be an array with at most ${MAX_CLIENT_TURNS} items`);
+  }
+  turns.forEach((turn, index) => {
+    if (!turn || typeof turn !== 'object' || Array.isArray(turn)) validation(`turns[${index}]`, 'must be an object');
+    if (!TURN_ROLES.has(turn.role)) validation(`turns[${index}].role`, 'must be student or patient');
+    if (typeof turn.text !== 'string' || !turn.text.trim() || Array.from(turn.text).length > MAX_TURN_TEXT_LENGTH) {
+      validation(`turns[${index}].text`, `must be a non-empty string of at most ${MAX_TURN_TEXT_LENGTH} characters`);
+    }
+    if (turn.createdAt !== undefined) isoTimestamp(turn.createdAt, `turns[${index}].createdAt`);
+    if (turn.role === 'student' && turn.source !== undefined && !STUDENT_SOURCES.has(turn.source)) {
+      validation(`turns[${index}].source`, 'must be voice or typed');
+    }
+  });
+  // Contents are deliberately not consumed. The registry transcript is the
+  // sole authority, so a valid-but-tampered client transcript cannot affect feedback.
+  return turns;
+}
+
+export function validateSessionEndRequest(body) {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) validation('body', 'must be an object');
+  const sessionId = requiredString(body.sessionId, 'sessionId');
+  const caseId = requiredString(body.caseId, 'caseId');
+  const started = isoTimestamp(body.startedAt, 'startedAt');
+  const ended = isoTimestamp(body.endedAt, 'endedAt');
+  if (ended.milliseconds < started.milliseconds) validation('endedAt', 'must not be before startedAt');
+  validateClientTurns(body.turns);
+  return { sessionId, caseId, startedAt: started.text, endedAt: ended.text };
+}
+
+/** POST /api/session/end — synchronous End; the authoritative session is scrubbed after completion. */
 export async function sessionEnd(req, res, next, deps = {}) {
-  const casesDir = deps.casesDir;
-  const feedbackFn = deps.generateFeedbackFn ?? generateFeedback;
-
   try {
-    const body = req.body ?? {};
-    const sessionId = requireNonEmptyString(body.sessionId, 'sessionId');
-    const caseId = requireNonEmptyString(body.caseId, 'caseId');
-    const startedAt = requireNonEmptyString(body.startedAt, 'startedAt');
-    const endedAt = requireNonEmptyString(body.endedAt, 'endedAt');
-    const turns = validateTurns(body.turns);
+    const input = validateSessionEndRequest(req.body);
+    const registry = deps.activeSessionRegistry ?? req.app.locals?.activeSessionRegistry ?? activeSessionRegistry;
+    const providers = req.app.locals?.providers;
+    const llmProvider = deps.llmProvider ?? providers?.llmProvider ?? providers?.foundry;
+    const feedbackFn = deps.generateFeedbackFn ?? generateFeedback;
 
-    const caseConfig = loadCaseById(caseId, { casesDir });
-
-    // Schedule M6 feedback analysis in the background
-    if (!isFeedbackGenerating(sessionId)) {
-      markFeedbackGenerating(sessionId);
-      const providers = req.app?.locals?.providers;
-      runBackgroundFeedback({
-        sessionId,
-        caseConfig,
-        turns,
-        openRouter: providers?.openRouter,
-        llmEnabled: providers?.services?.llmEnabled !== false,
-        feedbackFn,
-      }).catch((err) => {
-        console.error(
-          `[session-end] background feedback failed for ${sessionId}:`,
-          err,
-        );
-        markFeedbackDone(sessionId);
-      });
-    }
-
-    // Return immediately
-    res.status(200).json({ sessionId, feedbackStatus: 'generating' });
-  } catch (err) {
-    next(err);
-  }
-}
-
-/**
- * GET /api/session/:sessionId/feedback — poll feedback status.
- * @param {import('express').Request} req
- * @param {import('express').Response} res
- * @param {import('express').NextFunction} next
- */
-export async function getSessionFeedback(req, res, next) {
-  try {
-    const sessionId = req.params?.sessionId;
-    if (typeof sessionId !== 'string' || sessionId.trim() === '') {
-      throw new ApiError({
-        code: 'VALIDATION',
-        message: 'Invalid request: sessionId is required.',
-        retryable: false,
-        status: 400,
-        details: { field: 'sessionId' },
-      });
-    }
-
-    const result = await loadFeedbackResult(sessionId.trim());
-    if (result) {
-      if (result.ok) {
-        res.status(200).json({ status: 'ready', feedback: result.feedback });
-        return;
+    const result = await runEndOperationOnce(registry, input.sessionId, async () => {
+      const end = registry.beginEnd(input.sessionId, input.caseId);
+      const caseConfig = registry.getCaseConfig(input.sessionId, input.caseId);
+      try {
+        if (providers?.services?.llmEnabled === false) {
+          return { feedback: buildUnavailableFeedback(caseConfig) };
+        }
+        try {
+          const feedback = await feedbackFn({
+            caseConfig,
+            turns: end.snapshot.transcript,
+            startedAt: input.startedAt,
+            endedAt: input.endedAt,
+            llmProvider,
+          });
+          return { feedback };
+        } catch {
+          return { feedback: buildUnavailableFeedback(caseConfig) };
+        }
+      } finally {
+        registry.deleteSession(input.sessionId);
       }
-      res.status(200).json({ status: 'error', message: result.message });
-      return;
-    }
-
-    if (isFeedbackGenerating(sessionId.trim())) {
-      res.status(200).json({ status: 'generating' });
-      return;
-    }
-
-    res.status(404).json({
-      code: 'FEEDBACK_NOT_FOUND',
-      message: 'No feedback for this session.',
-      retryable: false,
-      status: 404,
     });
-  } catch (err) {
-    next(err);
+
+    res.status(200).json(result);
+  } catch (error) {
+    next(error);
   }
 }

@@ -3,7 +3,7 @@ import { Router } from 'express';
 import { getCase, startSessionHandler } from '../controllers/casesController.js';
 
 /**
- * M4 HTTP routes: GET /api/cases/:caseId, POST /api/session/start
+ * Public case and student-initiated session-start routes.
  * @param {{ casesDir?: string }} [deps]
  */
 export function createCaseRoutes(deps = {}) {

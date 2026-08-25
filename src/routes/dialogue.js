@@ -6,7 +6,7 @@ export { validatePatientReplyRequest };
 
 /**
  * M5 HTTP: POST /api/dialogue/patient-reply only.
- * @param {{ casesDir?: string, promptsDir?: string }} [deps]
+ * @param {{ promptsDir?: string, llmProvider?: object, activeSessionRegistry?: object }} [deps]
  */
 export function createDialogueRoutes(deps = {}) {
   const router = Router();

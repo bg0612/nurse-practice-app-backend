@@ -1,183 +1,171 @@
-// backend/src/clients/openRouterClient.js
 import { ApiError } from '../errors/apiError.js';
 
-const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
-const DEFAULT_OPENROUTER_TIMEOUT_MS = 20000;
+const RESPONSE_INTENTS = new Set(['patient-reply', 'feedback']);
+const TTS_FORMATS = new Set(['mp3', 'pcm', 'wav']);
 
-/**
- * @param {unknown} value
- * @param {number} fallback
- * @returns {number}
- */
-function parseTimeoutMs(value, fallback) {
-  const parsed = Number.parseInt(String(value ?? ''), 10);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+function required(value, label) {
+  const normalized = typeof value === 'string' ? value.trim() : '';
+  if (!normalized) throw new Error(`OpenRouter config invalid: ${label} is required`);
+  return normalized;
 }
 
-/**
- * Thin OpenRouter chat client for M5 (patient reply) and M6 (feedback).
- * Model id comes from LLM_MODEL in .env — swap without changing callers.
- *
- * @param {object} opts
- * @param {string} opts.model
- * @param {string} [opts.apiKey]
- * @param {'mock' | 'live'} [opts.mode='mock']
- * @param {typeof fetch} [opts.fetchImpl]
- */
-export function createOpenRouterClient({
-  model,
+function validateBaseUrl(value) {
+  const baseUrl = required(value, 'endpoint');
+  let parsed;
+  try {
+    parsed = new URL(baseUrl);
+  } catch {
+    throw new Error('OpenRouter config invalid: endpoint must be a valid URL');
+  }
+  if (parsed.protocol !== 'https:' || parsed.username || parsed.password || parsed.search || parsed.hash) {
+    throw new Error('OpenRouter config invalid: endpoint must be an HTTPS URL without credentials, query, or fragment');
+  }
+  return baseUrl.replace(/\/+$/, '');
+}
+
+function validateCommon({ endpoint, apiKey, mode, fetchImpl, timeoutMs }) {
+  const baseUrl = validateBaseUrl(endpoint);
+  if (!['mock', 'live'].includes(mode)) throw new Error('OpenRouter config invalid: mode must be mock or live');
+  if (mode === 'live' && !apiKey?.trim()) throw new Error('OpenRouter config invalid: OPENROUTER_API_KEY is required in live mode');
+  if (typeof fetchImpl !== 'function') throw new Error('OpenRouter config invalid: fetchImpl must be a function');
+  if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 300000) {
+    throw new Error('OpenRouter config invalid: timeoutMs must be an integer from 1 to 300000');
+  }
+  return baseUrl;
+}
+
+function providerError({ code, message, status = 502, retryable = true, details }) {
+  return new ApiError({ code, message, status, retryable, ...(details ? { details } : {}) });
+}
+
+async function fetchWithTimeout(fetchImpl, url, init, timeoutMs, failureMessage) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetchImpl(url, { ...init, signal: controller.signal });
+  } catch {
+    throw providerError({
+      code: controller.signal.aborted ? 'PROVIDER_TIMEOUT' : 'PROVIDER_UNAVAILABLE',
+      message: failureMessage,
+      status: controller.signal.aborted ? 504 : 502,
+    });
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+function authHeaders(apiKey) {
+  return { Authorization: `Bearer ${apiKey.trim()}`, 'Content-Type': 'application/json' };
+}
+
+export function createOpenRouterLlmClient({
+  endpoint = 'https://openrouter.ai/api/v1',
   apiKey,
+  model,
   mode = 'mock',
   fetchImpl = globalThis.fetch,
+  timeoutMs = 20000,
 }) {
-  if (!model) {
-    throw new Error('createOpenRouterClient: model is required');
-  }
+  const baseUrl = validateCommon({ endpoint, apiKey, mode, fetchImpl, timeoutMs });
+  const validatedModel = required(model, 'model');
 
-  /**
-   * @param {object} params
-   * @param {Array<{ role: string, content: string }>} params.messages
-   * @param {number} [params.temperature]
-   * @param {object} [params.responseFormat]
-   * @returns {Promise<{ content: string, model: string, mock: boolean }>}
-   */
-  async function chatCompletion({ messages, temperature = 0.7, responseFormat }) {
-    if (!Array.isArray(messages) || messages.length === 0) {
-      throw new ApiError({
-        code: 'PROVIDER_BAD_REQUEST',
-        message: 'OpenRouter chat requires at least one message.',
-        retryable: false,
-        status: 400,
-      });
+  async function complete({ systemPrompt, messages, maxOutputTokens, temperature, responseFormat, responseIntent }) {
+    if (!Array.isArray(messages) || messages.some((item) => !item || typeof item.content !== 'string')) {
+      throw providerError({ code: 'PROVIDER_BAD_REQUEST', message: 'OpenRouter completion requires valid messages.', status: 400, retryable: false });
     }
-
+    if (!Number.isSafeInteger(maxOutputTokens) || maxOutputTokens < 1 || !RESPONSE_INTENTS.has(responseIntent)) {
+      throw providerError({ code: 'PROVIDER_BAD_REQUEST', message: 'OpenRouter completion request is invalid.', status: 400, retryable: false });
+    }
+    if (temperature !== undefined && (typeof temperature !== 'number' || !Number.isFinite(temperature) || temperature < 0 || temperature > 2)) {
+      throw providerError({ code: 'PROVIDER_BAD_REQUEST', message: 'temperature must be a number from 0 to 2.', status: 400, retryable: false });
+    }
     if (mode === 'mock') {
-      const lastUser = [...messages].reverse().find((m) => m.role === 'user');
-      const snippet = (lastUser?.content ?? '').slice(0, 80);
-      const allText = messages.map((m) => String(m.content ?? '')).join('\n');
-
-      // M5 patient-reply: return schema-valid JSON so default mock E2E works without injects.
-      if (/Latest student utterance|patient-reply/i.test(allText) && /answerId|stageId|FALLBACK/i.test(allText)) {
-        const judgmental =
-          /shouldn't|should not|lazy|unacceptable|no excuses|stop being defensive|complications will end/i.test(
-            allText,
-          );
-        return {
-          content: JSON.stringify(
-            judgmental
-              ? {
-                  tone: 'bad',
-                  stageId: 'healthy_coping',
-                  answerId: 'B',
-                }
-              : {
-                  tone: 'good',
-                  stageId: 'lifestyle_exploration',
-                  answerId: 'A',
-                },
-          ),
-          model,
-          mock: true,
-        };
-      }
-
       return {
-        content: JSON.stringify({
-          mock: true,
-          model,
-          echo: snippet,
-          note: 'Deterministic OpenRouter mock — no network call',
-        }),
-        model,
+        rawText: responseIntent === 'patient-reply'
+          ? JSON.stringify({ replyText: "I'm listening. Could you ask me a little more specifically?", revealedFactIds: [] })
+          : JSON.stringify({ mock: true, responseIntent }),
+        model: validatedModel,
         mock: true,
       };
     }
 
-    if (!apiKey) {
-      throw new ApiError({
-        code: 'PROVIDER_MISCONFIGURED',
-        message: 'OPENROUTER_API_KEY is not configured on the server.',
-        retryable: false,
-        status: 500,
-      });
-    }
+    const normalizedSystemPrompt = typeof systemPrompt === 'string' ? systemPrompt.trim() : '';
+    const response = await fetchWithTimeout(fetchImpl, `${baseUrl}/chat/completions`, {
+      method: 'POST',
+      headers: authHeaders(apiKey),
+      body: JSON.stringify({
+        model: validatedModel,
+        messages: [
+          ...(normalizedSystemPrompt ? [{ role: 'system', content: normalizedSystemPrompt }] : []),
+          ...messages,
+        ],
+        max_tokens: maxOutputTokens,
+        ...(temperature === undefined ? {} : { temperature }),
+        response_format: responseFormat ?? { type: 'json_object' },
+      }),
+    }, timeoutMs, 'OpenRouter request failed. Please try again.');
 
-    let response;
-    const controller = new AbortController();
-    const timeoutMs = parseTimeoutMs(
-      process.env.OPENROUTER_TIMEOUT_MS,
-      DEFAULT_OPENROUTER_TIMEOUT_MS,
-    );
-    const timeoutId = setTimeout(() => {
-      controller.abort(new Error(`OpenRouter timed out after ${timeoutMs}ms`));
-    }, timeoutMs);
-    try {
-      response = await fetchImpl(OPENROUTER_URL, {
-        method: 'POST',
-        signal: controller.signal,
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-          'Content-Type': 'application/json',
-          'HTTP-Referer': 'http://localhost',
-          'X-Title': 'Nursing AI Patient Dialogue Simulator',
-        },
-        body: JSON.stringify({
-          model,
-          messages,
-          temperature,
-          ...(responseFormat ? { response_format: responseFormat } : {}),
-        }),
-      });
-    } catch (err) {
-      if (controller.signal.aborted) {
-        throw new ApiError({
-          code: 'PROVIDER_TIMEOUT',
-          message: 'OpenRouter request timed out. Please try again.',
-          retryable: true,
-          status: 504,
-          details: { timeoutMs },
-        });
-      }
-      throw new ApiError({
-        code: 'PROVIDER_UNAVAILABLE',
-        message: 'OpenRouter request failed. Please try again.',
-        retryable: true,
-        status: 502,
-        details: err instanceof Error ? err.message : String(err),
-      });
-    } finally {
-      clearTimeout(timeoutId);
-    }
-
+    let data;
+    try { data = await response.json(); } catch { data = undefined; }
     if (!response.ok) {
-      const bodyText = await response.text().catch(() => '');
-      throw new ApiError({
+      throw providerError({
         code: 'PROVIDER_ERROR',
         message: 'OpenRouter returned an error. Please try again.',
-        retryable: response.status >= 500 || response.status === 429,
-        status: 502,
-        details: { status: response.status, body: bodyText.slice(0, 500) },
+        retryable: response.status === 408 || response.status === 409 || response.status === 429 || response.status >= 500,
+        details: { status: response.status },
       });
     }
-
-    const data = await response.json();
-    const content = data?.choices?.[0]?.message?.content;
-    if (typeof content !== 'string') {
-      throw new ApiError({
-        code: 'PROVIDER_BAD_RESPONSE',
-        message: 'OpenRouter returned an unexpected response.',
-        retryable: true,
-        status: 502,
-      });
+    const rawText = data?.choices?.[0]?.message?.content;
+    if (typeof rawText !== 'string' || !rawText.trim()) {
+      throw providerError({ code: 'PROVIDER_BAD_RESPONSE', message: 'OpenRouter returned an unexpected response.' });
     }
-
-    return { content, model: data.model ?? model, mock: false };
+    return {
+      rawText,
+      ...(data?.usage && typeof data.usage === 'object' ? { usage: data.usage } : {}),
+      model: data?.model || validatedModel,
+      mock: false,
+    };
   }
 
-  return {
-    provider: 'openrouter',
-    model,
-    mode,
-    chatCompletion,
-  };
+  return Object.freeze({ provider: 'openrouter', endpoint: baseUrl, model: validatedModel, mode, timeoutMs, complete });
+}
+
+export function createOpenRouterTtsClient({
+  endpoint = 'https://openrouter.ai/api/v1',
+  apiKey,
+  model,
+  voice,
+  responseFormat = 'mp3',
+  speed = 1,
+  mode = 'live',
+  fetchImpl = globalThis.fetch,
+  timeoutMs = 20000,
+}) {
+  const baseUrl = validateCommon({ endpoint, apiKey, mode, fetchImpl, timeoutMs });
+  const validatedModel = required(model, 'TTS model');
+  const validatedVoice = required(voice, 'TTS voice');
+  if (!TTS_FORMATS.has(responseFormat)) throw new Error('OpenRouter config invalid: TTS response format must be mp3, pcm, or wav');
+  if (typeof speed !== 'number' || speed < 0.25 || speed > 4) throw new Error('OpenRouter config invalid: TTS speed must be from 0.25 to 4');
+
+  async function synthesize(request) {
+    const text = typeof request?.text === 'string' ? request.text.trim() : '';
+    if (!text) throw new Error('OpenRouter speech synthesis text is required');
+    const response = await fetchWithTimeout(fetchImpl, `${baseUrl}/audio/speech`, {
+      method: 'POST',
+      headers: authHeaders(apiKey),
+      body: JSON.stringify({ input: text, model: validatedModel, voice: validatedVoice, response_format: responseFormat, speed }),
+    }, timeoutMs, 'Patient speech is temporarily unavailable.');
+    if (!response?.ok) {
+      throw new ApiError({ code: 'TTS_FAILED', message: 'Patient speech is temporarily unavailable.', retryable: true, status: 502 });
+    }
+    const audio = new Uint8Array(await response.arrayBuffer());
+    if (audio.byteLength === 0) {
+      throw new ApiError({ code: 'TTS_FAILED', message: 'Patient speech is temporarily unavailable.', retryable: true, status: 502 });
+    }
+    const fallbackMediaType = responseFormat === 'mp3' ? 'audio/mpeg' : responseFormat === 'pcm' ? 'audio/pcm' : 'audio/wav';
+    const contentType = response.headers?.get?.('content-type');
+    return { mediaType: contentType?.startsWith('audio/') ? contentType.split(';')[0] : fallbackMediaType, audio };
+  }
+
+  return Object.freeze({ provider: 'openrouter', endpoint: baseUrl, model: validatedModel, voice: validatedVoice, responseFormat, mode, timeoutMs, synthesize });
 }

@@ -1,41 +1,30 @@
-// backend/src/models/feedbackModel.js
-// In-memory feedback result + in-flight tracking for background feedback
-// generation. Results are never written to disk; they live for the lifetime of
-// the server process and are polled via GET /api/session/:sessionId/feedback.
+// Only in-flight End operations are coordinated here. Completed results live on
+// the ActiveSessionRegistry record, so this module creates no completion store.
+const operationsByRegistry = new WeakMap();
 
-// Completed feedback results, keyed by sessionId.
-const results = new Map();
-
-// In-memory set of sessionIds currently being generated. Lives at module level so
-// POST /api/session/end and GET /api/session/:id/feedback share the same view.
-const inFlight = new Set();
-
-export function isFeedbackGenerating(sessionId) {
-  return inFlight.has(sessionId);
+function operationsFor(registry) {
+  let operations = operationsByRegistry.get(registry);
+  if (!operations) {
+    operations = new Map();
+    operationsByRegistry.set(registry, operations);
+  }
+  return operations;
 }
 
-export function markFeedbackGenerating(sessionId) {
-  inFlight.add(sessionId);
+/** Coalesce concurrent End requests for the same registry/session. */
+export function runEndOperationOnce(registry, sessionId, operation) {
+  const operations = operationsFor(registry);
+  const existing = operations.get(sessionId);
+  if (existing) return existing;
+
+  const pending = Promise.resolve().then(operation);
+  operations.set(sessionId, pending);
+  pending.finally(() => {
+    if (operations.get(sessionId) === pending) operations.delete(sessionId);
+  }).catch(() => {});
+  return pending;
 }
 
-export function markFeedbackDone(sessionId) {
-  inFlight.delete(sessionId);
-}
-
-/**
- * Store a feedback result in memory: { ok: true, feedback } or { ok: false, message }.
- * @param {string} sessionId
- * @param {{ ok: boolean, feedback?: unknown, message?: string }} result
- */
-export async function saveFeedbackResult(sessionId, result) {
-  results.set(sessionId, result);
-}
-
-/**
- * Load an in-memory feedback result, or null when absent.
- * @param {string} sessionId
- * @returns {Promise<{ ok: boolean, feedback?: unknown, message?: string } | null>}
- */
-export async function loadFeedbackResult(sessionId) {
-  return results.get(sessionId) ?? null;
+export function isEndOperationInFlight(registry, sessionId) {
+  return operationsFor(registry).has(sessionId);
 }

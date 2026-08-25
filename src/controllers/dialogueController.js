@@ -1,143 +1,74 @@
-// backend/src/controllers/dialogueController.js
 import { generatePatientReply } from '../services/patientReplyService.js';
+import { activeSessionRegistry } from '../services/activeSessionRegistry.js';
 import { ApiError } from '../errors/apiError.js';
 
 const STUDENT_SOURCES = new Set(['voice', 'typed']);
-const TURN_ROLES = new Set(['student', 'patient', 'system']);
+const TURN_ROLES = new Set(['student', 'patient']);
+const MAX_ID_LENGTH = 128;
+const MAX_UTTERANCE_LENGTH = 2000;
+const MAX_CLIENT_TURNS = 60;
 
-/**
- * Validate POST /api/dialogue/patient-reply body (§6.3).
- * @param {unknown} body
- */
-export function validatePatientReplyRequest(body) {
-  if (!body || typeof body !== 'object' || Array.isArray(body)) {
-    throw new ApiError({
-      code: 'VALIDATION',
-      message: 'Invalid patient-reply request.',
-      retryable: false,
-      status: 400,
-      details: { reason: 'body must be an object' },
-    });
-  }
-
-  const req = /** @type {Record<string, unknown>} */ (body);
-
-  for (const field of ['sessionId', 'caseId', 'studentUtterance']) {
-    if (typeof req[field] !== 'string' || req[field].trim() === '') {
-      throw new ApiError({
-        code: 'VALIDATION',
-        message: 'Invalid patient-reply request.',
-        retryable: false,
-        status: 400,
-        details: { field, reason: 'required non-empty string' },
-      });
-    }
-  }
-
-  if (typeof req.studentSource !== 'string' || !STUDENT_SOURCES.has(req.studentSource)) {
-    throw new ApiError({
-      code: 'VALIDATION',
-      message: 'Invalid patient-reply request.',
-      retryable: false,
-      status: 400,
-      details: { field: 'studentSource', reason: 'must be voice|typed' },
-    });
-  }
-
-  if (!Array.isArray(req.turns)) {
-    throw new ApiError({
-      code: 'VALIDATION',
-      message: 'Invalid patient-reply request.',
-      retryable: false,
-      status: 400,
-      details: { field: 'turns', reason: 'must be an array' },
-    });
-  }
-
-  for (let i = 0; i < req.turns.length; i += 1) {
-    const turn = req.turns[i];
-    if (!turn || typeof turn !== 'object' || Array.isArray(turn)) {
-      throw new ApiError({
-        code: 'VALIDATION',
-        message: 'Invalid patient-reply request.',
-        retryable: false,
-        status: 400,
-        details: { field: `turns[${i}]`, reason: 'must be an object' },
-      });
-    }
-    const t = /** @type {Record<string, unknown>} */ (turn);
-    if (typeof t.role !== 'string' || !TURN_ROLES.has(t.role)) {
-      throw new ApiError({
-        code: 'VALIDATION',
-        message: 'Invalid patient-reply request.',
-        retryable: false,
-        status: 400,
-        details: { field: `turns[${i}].role`, reason: 'must be student|patient|system' },
-      });
-    }
-    if (typeof t.text !== 'string') {
-      throw new ApiError({
-        code: 'VALIDATION',
-        message: 'Invalid patient-reply request.',
-        retryable: false,
-        status: 400,
-        details: { field: `turns[${i}].text`, reason: 'must be a string' },
-      });
-    }
-  }
-
-  if (
-    typeof req.highestUnlockedOrder !== 'number' ||
-    !Number.isInteger(req.highestUnlockedOrder) ||
-    req.highestUnlockedOrder < 1
-  ) {
-    throw new ApiError({
-      code: 'VALIDATION',
-      message: 'Invalid patient-reply request.',
-      retryable: false,
-      status: 400,
-      details: { field: 'highestUnlockedOrder', reason: 'must be a positive integer' },
-    });
-  }
-
-  return {
-    sessionId: /** @type {string} */ (req.sessionId).trim(),
-    caseId: /** @type {string} */ (req.caseId).trim(),
-    turns: /** @type {import('../services/patientReplyService.js').Turn[]} */ (req.turns),
-    studentUtterance: /** @type {string} */ (req.studentUtterance).trim(),
-    studentSource: /** @type {'voice' | 'typed'} */ (req.studentSource),
-    highestUnlockedOrder: /** @type {number} */ (req.highestUnlockedOrder),
-  };
+function validation(field, reason) {
+  throw new ApiError({
+    code: 'VALIDATION', message: 'Invalid patient-reply request.',
+    retryable: false, status: 400, details: { field, reason },
+  });
 }
 
-/**
- * POST /api/dialogue/patient-reply
- * @param {import('express').Request} req
- * @param {import('express').Response} res
- * @param {import('express').NextFunction} next
- * @param {{ casesDir?: string, promptsDir?: string }} deps
- */
+function requiredString(value, field, maxLength = MAX_ID_LENGTH) {
+  if (typeof value !== 'string' || !value.trim()) validation(field, 'required non-empty string');
+  const trimmed = value.trim();
+  if (Array.from(trimmed).length > maxLength) validation(field, `must be at most ${maxLength} characters`);
+  return trimmed;
+}
+
+export function validatePatientReplyRequest(body) {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) validation('body', 'must be an object');
+  const req = body;
+  const sessionId = requiredString(req.sessionId, 'sessionId');
+  const caseId = requiredString(req.caseId, 'caseId');
+  const clientTurnId = requiredString(req.clientTurnId, 'clientTurnId');
+  const studentUtterance = requiredString(req.studentUtterance, 'studentUtterance', MAX_UTTERANCE_LENGTH);
+  if (!STUDENT_SOURCES.has(req.studentSource)) validation('studentSource', 'must be voice|typed');
+  if (!Array.isArray(req.turns) || req.turns.length > MAX_CLIENT_TURNS) validation('turns', `must be an array with at most ${MAX_CLIENT_TURNS} items`);
+  const turns = req.turns.map((turn, index) => {
+    if (!turn || typeof turn !== 'object' || Array.isArray(turn)) validation(`turns[${index}]`, 'must be an object');
+    if (!TURN_ROLES.has(turn.role)) validation(`turns[${index}].role`, 'must be student|patient');
+    const text = requiredString(turn.text, `turns[${index}].text`, MAX_UTTERANCE_LENGTH);
+    if (turn.role === 'student' && turn.source !== undefined && !STUDENT_SOURCES.has(turn.source)) {
+      validation(`turns[${index}].source`, 'must be voice|typed');
+    }
+    if (turn.role === 'patient' && turn.source !== undefined) validation(`turns[${index}].source`, 'not allowed for patient turns');
+    return {
+      role: turn.role,
+      text,
+      ...(turn.role === 'student' && turn.source !== undefined ? { source: turn.source } : {}),
+    };
+  });
+  return { sessionId, caseId, clientTurnId, turns, studentUtterance, studentSource: req.studentSource };
+}
+
 export async function patientReply(req, res, next, deps = {}) {
   try {
     const providers = req.app.locals?.providers;
-    if (providers?.services && providers.services.llmEnabled === false) {
-      throw new ApiError({
-        code: 'LLM_DISABLED',
-        message: 'LLM service is disabled. Set LLM_ENABLED=true in the server .env.',
-        retryable: false,
-        status: 503,
-      });
+    if (providers?.services?.llmEnabled === false) {
+      throw new ApiError({ code: 'LLM_DISABLED', message: 'LLM service is disabled.', retryable: false, status: 503 });
     }
     const input = validatePatientReplyRequest(req.body);
-    const openRouter = providers?.openRouter;
-    const result = await generatePatientReply({
-      ...input,
-      openRouter,
-      casesDir: deps.casesDir,
-      promptsDir: deps.promptsDir,
-    });
+    const registry = deps.activeSessionRegistry ?? req.app.locals?.activeSessionRegistry ?? activeSessionRegistry;
+    const llmProvider = deps.llmProvider ?? providers?.llmProvider ?? providers?.foundry;
+    const result = await registry.processPatientTurn(input, ({ caseConfig, committedHistory, revealedFactIds }) =>
+      generatePatientReply({
+        caseConfig,
+        committedHistory,
+        revealedFactIds,
+        studentUtterance: input.studentUtterance,
+        studentSource: input.studentSource,
+        llmProvider,
+        promptsDir: deps.promptsDir,
+      }));
     res.status(200).json(result);
-  } catch (err) {
-    next(err);
+  } catch (error) {
+    next(error);
   }
 }

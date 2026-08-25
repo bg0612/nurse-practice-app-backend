@@ -1,6 +1,7 @@
 // backend/src/controllers/casesController.js
-import { loadCaseById, startSession } from '../models/caseModel.js';
+import { loadCaseById, startSession, toCasePublicView } from '../models/caseModel.js';
 import { ApiError } from '../errors/apiError.js';
+import { activeSessionRegistry } from '../services/activeSessionRegistry.js';
 
 /**
  * GET /api/cases/:caseId
@@ -12,7 +13,7 @@ import { ApiError } from '../errors/apiError.js';
 export function getCase(req, res, next, deps = {}) {
   try {
     const caseConfig = loadCaseById(req.params.caseId, { casesDir: deps.casesDir });
-    res.status(200).json(caseConfig);
+    res.status(200).json(toCasePublicView(caseConfig));
   } catch (err) {
     next(err);
   }
@@ -37,8 +38,16 @@ export function startSessionHandler(req, res, next, deps = {}) {
         details: { reason: 'caseId is required' },
       });
     }
-    const result = startSession(caseId.trim(), { casesDir: deps.casesDir });
-    res.status(200).json(result);
+    const normalizedCaseId = caseId.trim();
+    const result = startSession(normalizedCaseId, { casesDir: deps.casesDir });
+    const { caseConfig, ...publicResult } = result;
+    const registry = deps.activeSessionRegistry ?? req.app.locals?.activeSessionRegistry ?? activeSessionRegistry;
+    registry.createSession({
+      sessionId: result.sessionId,
+      caseId: normalizedCaseId,
+      caseConfig,
+    });
+    res.status(200).json(publicResult);
   } catch (err) {
     next(err);
   }
