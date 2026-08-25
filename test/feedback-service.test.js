@@ -4,6 +4,7 @@ import { describe, it } from 'node:test';
 import { loadCaseById } from '../src/models/caseModel.js';
 import {
   FEEDBACK_MAX_OUTPUT_TOKENS,
+  buildFeedbackResponseFormat,
   buildFeedbackUserMessage,
   generateFeedback,
   loadFeedbackSystemPrompt,
@@ -65,6 +66,10 @@ describe('feedback service', () => {
     const request = llmProvider.calls[0];
     assert.equal(request.responseIntent, 'feedback');
     assert.equal(request.maxOutputTokens, FEEDBACK_MAX_OUTPUT_TOKENS);
+    assert.equal(request.temperature, 0.2);
+    assert.deepEqual(request.responseFormat, buildFeedbackResponseFormat(baseCase));
+    assert.equal(request.responseFormat.json_schema.schema.properties.domains.minItems, 7);
+    assert.equal(request.responseFormat.json_schema.schema.properties.communicationSkills.minItems, 5);
     assert.equal(request.messages.length, 1);
     assert.equal(request.messages[0].content.split('Stop your medicine; it is dangerous.').length - 1, 1);
     assert.match(request.messages[0].content, /studentObjectives|communicationSkills|reflectionQuestions/);
@@ -112,20 +117,18 @@ describe('feedback service', () => {
     assert.deepEqual(result.reflectionQuestions, baseCase.assessment.reflectionQuestions);
   });
 
-  it('uses a second completion to repair invalid output', async () => {
+  it('does not make a second completion after invalid output', async () => {
     const rejected = 'Assessment: everything went well.';
     const llmProvider = provider([rejected, JSON.stringify(rawFor(baseCase))]);
     const result = await generateFeedback({ caseConfig: baseCase, turns, llmProvider });
-    assert.equal(result.status, 'complete');
-    assert.equal(llmProvider.calls.length, 2);
-    assert.match(llmProvider.calls[1].systemPrompt, /Output repair/);
-    assert.match(llmProvider.calls[1].messages.at(-1).content, /everything went well/);
+    assert.equal(result.status, 'unavailable');
+    assert.equal(llmProvider.calls.length, 1);
   });
 
-  it('returns unavailable after two invalid outputs or two provider failures', async () => {
+  it('returns unavailable after one invalid output or provider failure', async () => {
     for (const llmProvider of [provider(['bad']), provider([new Error('network')])]) {
       const result = await generateFeedback({ caseConfig: baseCase, turns, llmProvider });
-      assert.equal(llmProvider.calls.length, 2);
+      assert.equal(llmProvider.calls.length, 1);
       assert.deepEqual(result, {
         status: 'unavailable',
         message: 'Feedback could not be generated because of a technical error.',
@@ -145,13 +148,21 @@ describe('feedback service', () => {
     assert.equal(normalizeFeedbackResult(valid, baseCase).domains[1].status, 'partial');
   });
 
+  it('accepts a valid JSON object wrapped in provider commentary', async () => {
+    const wrapped = `Here is the assessment:\n${JSON.stringify(rawFor(baseCase))}\nDone.`;
+    const llmProvider = provider([wrapped]);
+    const result = await generateFeedback({ caseConfig: baseCase, turns, llmProvider });
+    assert.equal(result.status, 'complete');
+    assert.equal(llmProvider.calls.length, 1);
+  });
+
   it('keeps invalid assessment output on the unavailable path', async () => {
     const invalid = rawFor(baseCase);
     delete invalid.domains[0].evidence;
     const llmProvider = provider([JSON.stringify(invalid)]);
     const result = await generateFeedback({ caseConfig: baseCase, turns, llmProvider });
 
-    assert.equal(llmProvider.calls.length, 2);
+    assert.equal(llmProvider.calls.length, 1);
     assert.equal(result.status, 'unavailable');
     assert.deepEqual(result.reflectionQuestions, baseCase.assessment.reflectionQuestions);
   });
