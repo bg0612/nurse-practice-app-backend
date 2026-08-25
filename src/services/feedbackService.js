@@ -6,9 +6,8 @@ import { toFeedbackContext } from '../models/caseContext.js';
 
 export const FEEDBACK_MAX_OUTPUT_TOKENS = 2600;
 export const DEFAULT_PROMPT_PATH = path.join(PROMPTS_DIR, 'feedback.system.md');
-const COMPLETE_KEYS = new Set([
-  'status', 'domains', 'communicationSkills', 'overallComment',
-  'improvementTips', 'reflectionQuestions',
+const REQUIRED_FEEDBACK_KEYS = new Set([
+  'status', 'domains', 'communicationSkills', 'overallComment', 'improvementTips',
 ]);
 const ASSESSMENT_STATUSES = new Set(['met', 'partial', 'missed']);
 let cachedSystemPrompt;
@@ -65,8 +64,7 @@ function normalizeAssessments(rawItems, configured, field) {
   const byId = new Map();
   rawItems.forEach((item, index) => {
     if (!item || typeof item !== 'object' || Array.isArray(item)) throw new Error(`${field}[${index}] must be an object`);
-    const keys = Object.keys(item);
-    if (keys.length !== 5 || !['id', 'label', 'status', 'evidence', 'gap'].every((key) => keys.includes(key))) {
+    if (!['id', 'label', 'status', 'evidence', 'gap'].every((key) => Object.hasOwn(item, key))) {
       throw new Error(`${field}[${index}] has invalid fields`);
     }
     if (typeof item.id !== 'string' || byId.has(item.id) || !ASSESSMENT_STATUSES.has(item.status)) {
@@ -92,15 +90,13 @@ export function normalizeFeedbackResult(raw, caseConfig) {
   const communicationSkills = validateCriterionList(context.communicationSkills, 'assessment.communicationSkills');
   const reflectionQuestions = validateReflectionQuestions(context.reflectionQuestions);
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('feedback must be an object');
-  if (Object.keys(raw).length !== COMPLETE_KEYS.size || Object.keys(raw).some((key) => !COMPLETE_KEYS.has(key))) {
-    throw new Error('feedback fields do not match the complete result');
+  if ([...REQUIRED_FEEDBACK_KEYS].some((key) => !Object.hasOwn(raw, key))) {
+    throw new Error('feedback is missing required fields');
   }
   if (raw.status !== 'complete') throw new Error('status must be complete');
   if (!Array.isArray(raw.improvementTips) || raw.improvementTips.length < 1 || raw.improvementTips.length > 7) {
     throw new Error('improvementTips must contain 1 to 7 items');
   }
-  if (!Array.isArray(raw.reflectionQuestions)) throw new Error('reflectionQuestions must be an array');
-  raw.reflectionQuestions.forEach((question, index) => boundedString(question, `reflectionQuestions[${index}]`, 500));
   return {
     status: 'complete',
     domains: normalizeAssessments(raw.domains, domains, 'domains'),

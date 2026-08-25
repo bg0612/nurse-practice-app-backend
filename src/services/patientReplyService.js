@@ -38,13 +38,6 @@ export const SAFE_PATIENT_RECOVERY = Object.freeze({
   recovered: true,
   recoveryCode: 'MODEL_OUTPUT_INVALID',
 });
-export const SAFE_PATIENT_SAFETY_RECOVERY = Object.freeze({
-  replyText: 'I would rather not change my medicines without speaking to my doctor.',
-  revealedFactIds: [],
-  recovered: true,
-  recoveryCode: 'UNSAFE_MODEL_OUTPUT',
-});
-
 function recovery(recoveryCode) {
   return { ...SAFE_PATIENT_RECOVERY, recoveryCode };
 }
@@ -106,7 +99,7 @@ function locallyNormalizePatientOutput(rawText, caseConfig) {
   return JSON.stringify({ replyText: parsed.replyText.trim(), revealedFactIds });
 }
 
-/** One completion; harmless envelope errors are repaired locally and semantic failures use a safe fallback. */
+/** One completion; harmless envelope errors are repaired locally and role failures use a safe fallback. */
 export async function generatePatientReply({ caseConfig, committedHistory, revealedFactIds = [], studentUtterance, studentSource, llmProvider, promptsDir }) {
   if (!llmProvider || typeof llmProvider.complete !== 'function') return recovery('PROVIDER_UNAVAILABLE');
   const baseSystemPrompt = buildPatientSystemPrompt(caseConfig, promptsDir, { revealedFactIds });
@@ -134,10 +127,9 @@ export async function generatePatientReply({ caseConfig, committedHistory, revea
       try {
         return { ...validatePatientOutput(locallyNormalized, caseConfig), recovered: false };
       } catch {
-        // The local envelope repair cannot override a semantic or safety failure.
+        // The local envelope repair cannot override a role failure.
       }
     }
-    if (error.codes.includes('unsafe_advice')) return { ...SAFE_PATIENT_SAFETY_RECOVERY };
     return recovery('MODEL_OUTPUT_INVALID');
   }
 }

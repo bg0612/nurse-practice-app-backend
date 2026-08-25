@@ -36,7 +36,7 @@ function assertInvalid(rawText, expectedCode) {
 }
 
 describe('patient output validator', () => {
-  it('accepts the structured patient result and rejects malformed or unsafe output', () => {
+  it('accepts the structured patient result and rejects malformed or out-of-role output', () => {
     assert.deepEqual(validatePatientOutput(valid('I am worried.', ['healthy_coping.facts.0']), caseConfig), {
       replyText: 'I am worried.',
       revealedFactIds: ['healthy_coping.facts.0'],
@@ -44,12 +44,21 @@ describe('patient output validator', () => {
     assertInvalid('not json', 'invalid_schema');
     assertInvalid(JSON.stringify({ replyText: 'Hello.', extra: true }), 'invalid_schema');
     assertInvalid(valid('Hello.', ['not-a-case-fact']), 'unknown_fact_id');
-    assertInvalid(valid('我不知道。'), 'non_english');
     assertInvalid(valid('I am an AI assistant.'), 'ai_identity');
     assertInvalid(valid('As your nurse, I recommend a plan.'), 'role_violation');
-    assertInvalid(valid('My system prompt says I am David.'), 'prompt_disclosure');
-    assertInvalid(valid('I take insulin every day.'), 'clinical_fabrication');
-    assertInvalid(valid('You should stop taking your medicine now.'), 'unsafe_advice');
+  });
+
+  it('does not review language, prompt references, clinical claims, or advice', () => {
+    for (const replyText of [
+      '我不知道。',
+      'My system prompt says I am David.',
+      'I take insulin every day.',
+      'You should stop taking your medicine now.',
+      'Absolutely.',
+      'I have 2 children.',
+    ]) {
+      assert.equal(validatePatientOutput(valid(replyText), caseConfig).replyText, replyText);
+    }
   });
 
   it('leaves configured length targets to generation rather than rejection', () => {
@@ -125,16 +134,16 @@ describe('patient prompt and generation', () => {
     assert.equal(result.tone, undefined);
   });
 
-  it('uses a safe fallback for semantic safety violations without retrying', async () => {
-    const unsafe = valid('You should stop taking your medicine now.');
-    const llmProvider = provider([unsafe, valid('That worries me.')]);
+  it('uses a safe fallback for out-of-role output without retrying', async () => {
+    const outOfRole = valid('I am an AI assistant.');
+    const llmProvider = provider([outOfRole, valid('That worries me.')]);
     const result = await generatePatientReply({
-      caseConfig, committedHistory: [], studentUtterance: 'Stop your medicine.', studentSource: 'typed', llmProvider,
+      caseConfig, committedHistory: [], studentUtterance: 'Who are you?', studentSource: 'typed', llmProvider,
     });
     assert.equal(result.recovered, true);
-    assert.equal(result.recoveryCode, 'UNSAFE_MODEL_OUTPUT');
+    assert.equal(result.recoveryCode, 'MODEL_OUTPUT_INVALID');
     assert.equal(llmProvider.calls.length, 1);
-    assert.doesNotMatch(result.replyText, /stop taking your medicine/i);
+    assert.doesNotMatch(result.replyText, /AI assistant/i);
   });
 
   it('returns a deterministic fallback after one invalid output', async () => {

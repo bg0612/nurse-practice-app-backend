@@ -97,6 +97,21 @@ describe('feedback service', () => {
     assert.deepEqual(result.reflectionQuestions, baseCase.assessment.reflectionQuestions);
   });
 
+  it('ignores harmless extra fields and model reflection questions', async () => {
+    const raw = rawFor(baseCase, {
+      extraTopLevelField: { ignored: true },
+      reflectionQuestions: { not: 'an array' },
+    });
+    raw.domains[0].extraAssessmentField = 'ignored';
+    raw.communicationSkills[0].extraAssessmentField = ['ignored'];
+    const llmProvider = provider([JSON.stringify(raw)]);
+    const result = await generateFeedback({ caseConfig: baseCase, turns, llmProvider });
+
+    assert.equal(result.status, 'complete');
+    assert.equal(llmProvider.calls.length, 1);
+    assert.deepEqual(result.reflectionQuestions, baseCase.assessment.reflectionQuestions);
+  });
+
   it('uses a second completion to repair invalid output', async () => {
     const rejected = 'Assessment: everything went well.';
     const llmProvider = provider([rejected, JSON.stringify(rawFor(baseCase))]);
@@ -128,6 +143,17 @@ describe('feedback service', () => {
     const valid = rawFor(baseCase);
     valid.domains[1].status = 'partial';
     assert.equal(normalizeFeedbackResult(valid, baseCase).domains[1].status, 'partial');
+  });
+
+  it('keeps invalid assessment output on the unavailable path', async () => {
+    const invalid = rawFor(baseCase);
+    delete invalid.domains[0].evidence;
+    const llmProvider = provider([JSON.stringify(invalid)]);
+    const result = await generateFeedback({ caseConfig: baseCase, turns, llmProvider });
+
+    assert.equal(llmProvider.calls.length, 2);
+    assert.equal(result.status, 'unavailable');
+    assert.deepEqual(result.reflectionQuestions, baseCase.assessment.reflectionQuestions);
   });
 
   it('keeps the universal prompt concise and explicit about safety and grading', () => {
