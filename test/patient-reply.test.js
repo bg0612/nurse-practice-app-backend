@@ -104,6 +104,16 @@ describe('patient prompt and generation', () => {
 
   it('contains generic safety and gradual-disclosure behaviour without preset dialogue', () => {
     const system = buildPatientSystemPrompt(caseConfig);
+    assert.match(system, /Patient perspective is mandatory/i);
+    assert.match(system, /patient's own response.*first-person English/i);
+    assert.match(system, /Never answer as an external observer.*nurse, clinician, tutor/i);
+    assert.match(system, /exactly one of `empathetic` or `judgmental`/i);
+    assert.match(system, /`empathetic`: be noticeably more cooperative and open/i);
+    assert.match(system, /`judgmental`: reduce cooperation in an observable but realistic way/i);
+    assert.doesNotMatch(system, /`neutral`|three tones/i);
+    assert.match(system, /repairs rapport immediately for that turn/i);
+    assert.match(system, /no more than 3 sentences and no more than 300 characters/i);
+    assert.match(system, /mandatory and must never be exceeded/i);
     assert.match(system, /Disclose gradually|Usually give no more than two relevant details/i);
     assert.match(system, /unsafe, absolute, or impractical/i);
     assert.doesNotMatch(system, /Expected Student Opening|AI Patient Response|Stage 1|Stage 2/);
@@ -123,7 +133,7 @@ describe('patient prompt and generation', () => {
   });
 
   it('repairs harmless JSON envelope differences locally without a second completion', async () => {
-    const raw = JSON.stringify({ replyText: 'I am worried.', revealedFactIds: ['healthy_coping.facts.0'], tone: 'neutral' });
+    const raw = JSON.stringify({ replyText: 'I am worried.', revealedFactIds: ['healthy_coping.facts.0'], tone: 'empathetic' });
     const llmProvider = provider([`\`\`\`json\n${raw}\n\`\`\``]);
     const result = await generatePatientReply({
       caseConfig, committedHistory: [], studentUtterance: 'How are you?', studentSource: 'typed', llmProvider,

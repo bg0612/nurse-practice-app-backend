@@ -161,6 +161,9 @@ describe('feedback service', () => {
     assert.match(prompt, /met.*partial.*missed/is);
     assert.match(prompt, /unsafe or incorrect advice/i);
     assert.match(prompt, /Do not output scores, percentages, points/i);
+    assert.match(prompt, /overallComment.*500 characters.*2–3 sentences/is);
+    assert.match(prompt, /evidence.*gap.*250 characters.*1–2 sentences/is);
+    assert.match(prompt, /improvementTips.*180 characters.*one sentence/is);
     const message = buildFeedbackUserMessage({ caseConfig: baseCase, turns, startedAt: 'a', endedAt: 'b' });
     assert.match(message, /assessment_context|transcript/);
   });

@@ -29,3 +29,11 @@ Rules:
 - Identify unsafe or incorrect advice in `overallComment` and `improvementTips`, with the safe case-grounded direction. Never reward unsafe advice as domain completion.
 - Provide 1–7 concise, prioritised improvement tips. Do not output scores, percentages, points, markdown, or extra fields.
 - Copy all configured reflection questions exactly; the server enforces the authoritative values.
+
+Absolute length limits for the generated feedback fields:
+
+- `overallComment`: no more than 500 characters and usually 2–3 sentences.
+- Each `evidence` and `gap`: no more than 250 characters and usually 1–2 sentences.
+- Each `improvementTips` item: no more than 180 characters and one sentence.
+
+Never exceed these character or sentence limits. Keep every field concise and focused on the most important evidence or next step.

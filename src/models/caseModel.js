@@ -118,7 +118,7 @@ function validateRuntime(value) {
   const expectedLimits = {
     minSentences: 1,
     maxSentences: 3,
-    maxCharacters: 250,
+    maxCharacters: 300,
     maxOutputTokens: 512,
     maxStudentTurns: 30,
     warningAtStudentTurn: 25,
