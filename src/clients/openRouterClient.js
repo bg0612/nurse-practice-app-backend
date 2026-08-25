@@ -102,6 +102,13 @@ export function createOpenRouterLlmClient({
         max_tokens: maxOutputTokens,
         ...(temperature === undefined ? {} : { temperature }),
         response_format: responseFormat ?? { type: 'json_object' },
+        // DeepSeek V4 enables reasoning by default. Different upstreams can
+        // otherwise spend very different portions of max_tokens on hidden
+        // reasoning for the same request.
+        reasoning: { effort: 'none', exclude: true },
+        // OpenRouter may route this model across many upstream providers.
+        // Only select endpoints that honour JSON schema and reasoning controls.
+        provider: { require_parameters: true },
       }),
     }, timeoutMs, 'OpenRouter request failed. Please try again.');
 

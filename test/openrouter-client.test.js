@@ -23,6 +23,8 @@ describe('OpenRouter temporary provider adapters', () => {
     assert.equal(body.model, 'openai/gpt-4o-mini');
     assert.equal(body.max_tokens, 120);
     assert.deepEqual(body.response_format, { type: 'json_object' });
+    assert.deepEqual(body.reasoning, { effort: 'none', exclude: true });
+    assert.deepEqual(body.provider, { require_parameters: true });
     assert.deepEqual(body.messages.map(({ role }) => role), ['system', 'user']);
     assert.equal(result.rawText, '{"replyText":"Hello.","revealedFactIds":[]}');
   });

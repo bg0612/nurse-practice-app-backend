@@ -60,6 +60,7 @@ describe('Microsoft Foundry client', () => {
     assert.equal(captured.init.headers.Authorization, undefined);
     assert.equal(body.model, 'deepseek-v4-flash-prod');
     assert.equal(body.max_output_tokens, 120);
+    assert.equal(body.reasoning_effort, 'none');
     assert.deepEqual(body.messages, [
       { role: 'system', content: 'Act only as the configured patient.' },
       { role: 'user', content: 'How are you feeling?' },

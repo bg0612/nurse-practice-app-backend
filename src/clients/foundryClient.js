@@ -211,6 +211,9 @@ export function createFoundryClient({
           max_output_tokens: maxOutputTokens,
           ...(temperature === undefined ? {} : { temperature }),
           response_format: responseFormat ?? { type: 'json_object' },
+          // Keep patient replies and feedback direct and deterministic across
+          // both supported LLM transports.
+          reasoning_effort: 'none',
         }),
       });
     } catch (error) {
