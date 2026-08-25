@@ -119,7 +119,7 @@ function validateRuntime(value) {
     minSentences: 1,
     maxSentences: 3,
     maxCharacters: 250,
-    maxOutputTokens: 160,
+    maxOutputTokens: 512,
     maxStudentTurns: 30,
     warningAtStudentTurn: 25,
   };

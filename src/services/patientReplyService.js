@@ -118,6 +118,8 @@ export async function generatePatientReply({ caseConfig, committedHistory, revea
     return recovery('PROVIDER_ERROR');
   }
 
+  console.log('[patient-reply] LLM output:', completion?.rawText);
+
   try {
     return { ...validatePatientOutput(completion?.rawText, caseConfig), recovered: false };
   } catch (error) {

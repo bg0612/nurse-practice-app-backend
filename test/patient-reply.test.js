@@ -116,7 +116,7 @@ describe('patient prompt and generation', () => {
     });
     assert.equal(result.recovered, false);
     assert.equal(llmProvider.calls.length, 1);
-    assert.equal(llmProvider.calls[0].maxOutputTokens, 160);
+    assert.equal(llmProvider.calls[0].maxOutputTokens, 512);
     assert.equal(llmProvider.calls[0].temperature, 0.2);
     assert.deepEqual(llmProvider.calls[0].responseFormat, PATIENT_REPLY_RESPONSE_FORMAT);
     assert.equal(result.tone, undefined);
